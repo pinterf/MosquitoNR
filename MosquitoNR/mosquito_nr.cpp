@@ -31,8 +31,8 @@ MosquitoNR::MosquitoNR(PClip _child, int _strength, int _restore, int _radius, i
   // error checks
   if (!(env->GetCPUFlags() & CPUF_SSE2))
     env->ThrowError("MosquitoNR: SSE2 support is required.");
-  if (!(vi.IsYUY2() || (vi.IsYUV() && vi.IsPlanar() && vi.BytesFromPixels(1) == 1)))
-    env->ThrowError("MosquitoNR: input must be YUY2 or 8-bit YUV planar format.");
+  if (!(vi.IsYUV() && vi.IsPlanar() && vi.BytesFromPixels(1) == 1))
+    env->ThrowError("MosquitoNR: input must be 8-bit YUV planar format.");
   if (width < 4 || height < 4) env->ThrowError("MosquitoNR: input is too small.");
   if (strength < 0 || 32 < strength) env->ThrowError("MosquitoNR: strength must be 0-32.");
   if (restore < 0 || 128 < restore) env->ThrowError("MosquitoNR: restore must be 0-128.");
@@ -163,49 +163,6 @@ void MosquitoNR::CopyLumaFrom()
   const BYTE* srcp = src->GetReadPtr();
   short* dstp = luma[0];
 
-  if (vi.IsYUY2())	// YUY2
-  {
-    const int hloop = (width + 7) / 8;
-
-    __asm
-    {
-      mov			esi, srcp			// esi = srcp
-      mov			edi, dstp
-      mov			eax, src_pitch		// eax = src_pitch
-      mov			ebx, dst_pitch		// ebx = pitch * sizeof(short)
-      mov			ecx, height			// ecx = height
-      lea			edi, [edi + 2 * ebx + 16]	// edi = dstp + 2 * pitch + 8
-      mov			edx, 00ff00ffh
-      movd		xmm7, edx
-      pshufd		xmm7, xmm7, 0		// xmm7 = [0x00ff] * 8
-
-      align 16
-      nextrow_yuy2:
-      push		esi
-        push		edi
-        mov			edx, hloop			// edx = hloop
-
-        align 16
-        next8pixels_yuy2 :
-        movdqu		xmm0, [esi]			// VYUYVYUYVYUYVYUY
-        pand		xmm0, xmm7			// -Y-Y-Y-Y-Y-Y-Y-Y
-        psllw		xmm0, 4				// convert to internal 12-bit precision
-        movdqa[edi], xmm0
-        add			esi, 16
-        add			edi, 16
-        sub			edx, 1
-        jnz			next8pixels_yuy2
-
-        pop			edi
-        pop			esi
-        add			esi, eax
-        add			edi, ebx
-        sub			ecx, 1
-        jnz			nextrow_yuy2
-    }
-  }
-  else	// planar format
-  {
     const int hloop = (width + 15) / 16;
 
     __asm
@@ -246,7 +203,6 @@ void MosquitoNR::CopyLumaFrom()
         sub			ecx, 1
         jnz			nextrow_planar
     }
-  }
 
   // horizontal reflection
   short* p = luma[0] + 2 * pitch + 8;
@@ -268,67 +224,6 @@ void MosquitoNR::CopyLumaTo()
   short* srcp = luma[1];
   BYTE* dstp = dst->GetWritePtr();
 
-  if (vi.IsYUY2())	// YUY2
-  {
-    const int src_pitch2 = src->GetPitch();
-    const int hloop = (width + 7) / 8;
-    const BYTE* srcp2 = src->GetReadPtr();
-
-    __asm
-    {
-      mov			esi, srcp
-      mov			ebx, srcp2			// ebx = srcp2
-      mov			edi, dstp			// edi = dstp
-      mov			eax, src_pitch		// eax = pitch * sizeof(short)
-      mov			ecx, height			// ecx = height
-      lea			esi, [esi + 2 * eax + 16]	// esi = srcp + 2 * pitch + 8
-      mov			edx, 000ff00ffh
-      movd		xmm5, edx
-      mov			edx, 0ff00ff00h
-      movd		xmm6, edx
-      mov			edx, 000080008h
-      movd		xmm7, edx
-      pxor		xmm4, xmm4			// xmm4 = [0x0000] * 8
-      pshufd		xmm5, xmm5, 0		// xmm5 = [0x00ff] * 8
-      pshufd		xmm6, xmm6, 0		// xmm6 = [0xff00] * 8
-      pshufd		xmm7, xmm7, 0		// xmm7 = [0x0008] * 8
-
-      align 16
-      nextrow_yuy2:
-      push		esi
-        push		ebx
-        push		edi
-        mov			edx, hloop			// edx = hloop
-
-        align 16
-        next8pixels_yuy2:
-      movdqa		xmm0, [esi]
-        movdqu		xmm1, [ebx]
-        paddw		xmm0, xmm7
-        psraw		xmm0, 4
-        pmaxsw		xmm0, xmm4
-        pminsw		xmm0, xmm5			// -Y-Y-Y-Y-Y-Y-Y-Y
-        pand		xmm1, xmm6			// V-U-V-U-V-U-V-U-
-        por			xmm0, xmm1			// VYUYVYUYVYUYVYUY
-        movdqa[edi], xmm0
-        add			esi, 16
-        add			ebx, 16
-        add			edi, 16
-        sub			edx, 1
-        jnz			next8pixels_yuy2
-
-        pop			edi
-        pop			ebx
-        pop			esi
-        add			esi, eax
-        add			ebx, src_pitch2
-        add			edi, dst_pitch
-        sub			ecx, 1
-        jnz			nextrow_yuy2
-    }
-  }
-  else	// planar format
-  {
     const int hloop = (width + 15) / 16;
 
     __asm
@@ -371,7 +266,6 @@ void MosquitoNR::CopyLumaTo()
         sub			ecx, 1
         jnz			nextrow_planar
     }
-  }
 }
 
 void MosquitoNR::Smoothing(int thread_id)
