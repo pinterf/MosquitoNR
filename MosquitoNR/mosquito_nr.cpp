@@ -52,7 +52,6 @@ MosquitoNR::MosquitoNR(PClip _child, int _strength, int _restore, int _radius, i
   if (!mt.CreateThreads(threads, this))
     env->ThrowError("MosquitoNR: failed to create threads.");
 
-  CPUCheck();
 }
 
 // destructor
@@ -140,19 +139,6 @@ void MosquitoNR::FreeBuffer()
   for (int i = 0; i < threads; ++i) _aligned_free(work[i]);
 
   InitBuffer();
-}
-
-void MosquitoNR::CPUCheck()
-{
-  unsigned tmp;
-
-  __asm {
-    mov		eax, 1
-    cpuid
-    mov		tmp, ecx
-  }
-
-  ssse3 = (tmp & 0x200) != 0;
 }
 
 void MosquitoNR::CopyLumaFrom()

@@ -73,7 +73,6 @@ private:
 	void InitBuffer();
 	bool AllocBuffer();
 	void FreeBuffer();
-	void CPUCheck();
 	void SmoothingSSE2(int thread_id);
 	void SmoothingSSSE3(int thread_id);
 
