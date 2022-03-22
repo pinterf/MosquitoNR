@@ -376,8 +376,7 @@ void MosquitoNR::CopyLumaTo()
 
 void MosquitoNR::Smoothing(int thread_id)
 {
-  if (ssse3) SmoothingSSSE3(thread_id);
-  else       SmoothingSSE2(thread_id);
+  SmoothingSSSE3(thread_id);
 }
 
 AVSValue __cdecl CreateMosquitoNR(AVSValue args, void* user_data, IScriptEnvironment* env)
