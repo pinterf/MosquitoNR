@@ -1,0 +1,81 @@
+
+                              MosquitoNR ver 0.10
+
+
+[Description]
+
+    MosquitoNR is a noise reduction filter designed for mosquito noise, which is
+  often caused by lossy compression such as MPEG. This filter works as follows:
+
+  1. Compute low frequency components of the image.
+  2. Apply direction-aware blur (smoothing). This blur effectively reduces
+     compression artifacts, but also breaks detail.
+  3. Restore the low frequency components to the blurred image.
+
+    MosquitoNR processes only luma. If you want to process chroma too, you can
+  write script like following, but there might be no noticeable change.
+
+  |  MosquitoNR()
+  |  u = UtoY().MosquitoNR()  # In AviSynth 2.6, UtoY8() may be faster
+  |  v = VtoY().MosquitoNR()
+  |  YtoUV(u, v, last)
+
+
+[Parameters]
+
+  Syntax: MosquitoNR([clip,] int strength, int restore, int radius, int threads)
+
+  - strength (range: 0-32, default: 16)
+      Sets the strength of the blur. Setting this value higher brings stronger
+    noise reduction effect, but side effect will also become stronger.
+
+  - restore (range: 0-128, default: 128)
+      Sets the rate of restoring. If set to 0, no restoring is performed. If set
+    to 128, low frequency components of the blurred image is completely replaced
+    with those of the original image, and runs slightly faster.
+
+  - radius (range: 1-2, default: 2)
+      Sets the radius of the blur. 1 is faster, but will have insufficient
+    effect in some cases.
+
+  - threads (range: 0-32, default: 0)
+      Controls how many threads are used. By default, threads is set equal to
+    automatically detected number of processors. Since this filter needs a lot
+    of memory access, thread efficiency is not very good. Setting this value
+    lower might improve overall processing speed.
+
+
+[Requirements]
+
+  - AviSynth 2.5.8 or later
+  - CPU with SSE2 support
+  - Supported color formats: YUY2, YV12, YV16, YV24, YV411, Y8
+  - Progressive only
+
+
+[Acknowledgments]
+
+    This filter is a combination of flash3kyuu's AviUtl plugin "smoothing filter"
+  and nilpo's AviUtl plugin "low frequency components protection filter", and
+  this combination was proposed by POP@4bit. I thank all of them very much.
+
+  flash3kyuu's web page (Japanese):  http://www.geocities.jp/flash3kyuu/
+  nilpo's web page (Japanese):       http://nilposoft.info/aviutl-plugin/
+  POP@4bit's web page (Japanese):    http://pop.4-bit.jp/?p=3362
+
+
+[Changelog]
+
+  ver 0.10 (2013-03-14)
+    - fixed a crash with AviSynth MT
+    - added support for YV16, YV24, Y411, Y8
+    - some speed optimizations
+    - added English documentation
+
+  ver.120210 (2012-02-10)
+    - initial release
+
+
+e-mail:  oinari17@gmail.com
+twitter: @b_inary
+
