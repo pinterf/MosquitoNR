@@ -67,13 +67,13 @@ PVideoFrame __stdcall MosquitoNR::GetFrame(int n, IScriptEnvironment* env)
   // copy chroma
   if (!vi.IsY8() && vi.IsPlanar()) {
     env->BitBlt(dst->GetWritePtr(PLANAR_U), dst->GetPitch(PLANAR_U), src->GetReadPtr(PLANAR_U), src->GetPitch(PLANAR_U),
-      vi.GetRowSize(PLANAR_U), vi.GetHeight(PLANAR_U));
+      src->GetRowSize(PLANAR_U), src->GetHeight(PLANAR_U));
     env->BitBlt(dst->GetWritePtr(PLANAR_V), dst->GetPitch(PLANAR_V), src->GetReadPtr(PLANAR_V), src->GetPitch(PLANAR_V),
-      vi.GetRowSize(PLANAR_V), vi.GetHeight(PLANAR_V));
+      src->GetRowSize(PLANAR_V), src->GetHeight(PLANAR_V));
   }
 
   if (strength == 0) {	// do nothing
-    env->BitBlt(dst->GetWritePtr(), dst->GetPitch(), src->GetReadPtr(), src->GetPitch(), vi.GetRowSize(), vi.GetHeight());
+    env->BitBlt(dst->GetWritePtr(), dst->GetPitch(), src->GetReadPtr(), src->GetPitch(), src->GetRowSize(), src->GetHeight());
     return dst;
   }
 
