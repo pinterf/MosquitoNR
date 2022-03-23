@@ -1,5 +1,5 @@
 
-                              MosquitoNR ver 0.10
+                              MosquitoNR ver 0.20
 
 
 [Description]
@@ -47,8 +47,8 @@
 
 [Requirements]
 
-  - AviSynth 2.5.8 or later
-  - CPU with SSE2 support
+  - AviSynth 2.6 or later, Windows
+  - CPU with SSSE3 support
   - Supported color formats: YUY2, YV12, YV16, YV24, YV411, Y8
   - Progressive only
 
@@ -63,8 +63,24 @@
   nilpo's web page (Japanese):       http://nilposoft.info/aviutl-plugin/
   POP@4bit's web page (Japanese):    http://pop.4-bit.jp/?p=3362
 
+[Links]
+
+  http://avisynth.nl/index.php/MosquitoNR
+
+  https://forum.doom9.org/showthread.php?t=167582
 
 [Changelog]
+  
+  ver 0.2 (2022-03-23) (pinterf)
+    - moved to github: https://github.com/pinterf/MosquitoNR
+    - No longer a cpp 2.5 plugin: update to Avisynth V2.6 interface
+    - Preserve frame properties when AviSynth+
+    - All inline assembly code is converted to SIMD intrinsics: 64 bit build possible
+    - YUY2 support kept but handled as YV16 internally
+    - Requires SSSE3 instead of SSE2
+    - Add DLL version resource
+    - Todo: reverse engineer to have C versions of the algorithms (no intel)
+    - Todo: non-Windows friendly source
 
   ver 0.10 (2013-03-14)
     - fixed a crash with AviSynth MT
@@ -75,7 +91,7 @@
   ver.120210 (2012-02-10)
     - initial release
 
-
+Original author:
 e-mail:  oinari17@gmail.com
 twitter: @b_inary
 
