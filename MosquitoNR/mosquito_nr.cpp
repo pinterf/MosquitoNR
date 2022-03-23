@@ -37,8 +37,8 @@ MosquitoNR::MosquitoNR(PClip _child, int _strength, int _restore, int _radius, i
   // error checks
   if (!(env->GetCPUFlags() & CPUF_SSE2))
     env->ThrowError("MosquitoNR: SSE2 support is required.");
-  if (!(vi.IsYUV() && vi.IsPlanar() && vi.BytesFromPixels(1) == 1))
-    env->ThrowError("MosquitoNR: input must be 8-bit YUV planar format.");
+  if (!(vi.IsYUV() && vi.IsPlanar() && vi.BitsPerComponent() == 8))
+    env->ThrowError("MosquitoNR: input must be 8-bit Y or YUV format.");
   if (width < 4 || height < 4) env->ThrowError("MosquitoNR: input is too small.");
   if (strength < 0 || 32 < strength) env->ThrowError("MosquitoNR: strength must be 0-32.");
   if (restore < 0 || 128 < restore) env->ThrowError("MosquitoNR: restore must be 0-128.");
@@ -235,7 +235,26 @@ void MosquitoNR::Smoothing(int thread_id)
 
 AVSValue __cdecl CreateMosquitoNR(AVSValue args, void* user_data, IScriptEnvironment* env)
 {
-  return new MosquitoNR(args[0].AsClip(), args[1].AsInt(16), args[2].AsInt(128), args[3].AsInt(2), args[4].AsInt(0), env);
+  const VideoInfo& vi_orig = args[0].AsClip()->GetVideoInfo();
+
+  // convert old RGB format to planar RGB
+  AVSValue new_args[1] = { args[0].AsClip() };
+  PClip clip;
+  if (vi_orig.IsYUY2()) {
+    clip = env->Invoke("ConvertToYV16", AVSValue(new_args, 1)).AsClip();
+  }
+  else {
+    clip = args[0].AsClip();
+  }
+
+  auto Result = new MosquitoNR(clip, args[1].AsInt(16), args[2].AsInt(128), args[3].AsInt(2), args[4].AsInt(0), env);
+
+  if (vi_orig.IsYUY2()) {
+    AVSValue new_args2[1] = { Result };
+    return env->Invoke("ConvertToYUY2", AVSValue(new_args2, 1)).AsClip();
+  }
+
+  return Result;
 }
 
 const AVS_Linkage* AVS_linkage = nullptr;
