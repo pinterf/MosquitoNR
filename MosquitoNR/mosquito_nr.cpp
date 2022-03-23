@@ -35,8 +35,8 @@ MosquitoNR::MosquitoNR(PClip _child, int _strength, int _restore, int _radius, i
   InitBuffer();
 
   // error checks
-  if (!(env->GetCPUFlags() & CPUF_SSE2))
-    env->ThrowError("MosquitoNR: SSE2 support is required.");
+  if (!(env->GetCPUFlags() & CPUF_SSSE3))
+    env->ThrowError("MosquitoNR: SSSE3 support is required.");
   if (!(vi.IsYUV() && vi.IsPlanar() && vi.BitsPerComponent() == 8))
     env->ThrowError("MosquitoNR: input must be 8-bit Y or YUV format.");
   if (width < 4 || height < 4) env->ThrowError("MosquitoNR: input is too small.");
@@ -237,7 +237,6 @@ AVSValue __cdecl CreateMosquitoNR(AVSValue args, void* user_data, IScriptEnviron
 {
   const VideoInfo& vi_orig = args[0].AsClip()->GetVideoInfo();
 
-  // convert old RGB format to planar RGB
   AVSValue new_args[1] = { args[0].AsClip() };
   PClip clip;
   if (vi_orig.IsYUY2()) {
