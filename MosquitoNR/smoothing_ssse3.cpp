@@ -1,8 +1,10 @@
 //------------------------------------------------------------------------------
-//		smoothing_ssse3.cpp
+// smoothing_ssse3.cpp
 //------------------------------------------------------------------------------
 
 #include "mosquito_nr.h"
+#include <emmintrin.h>
+#include <tmmintrin.h>
 
 // direction-aware blur
 void MosquitoNR::SmoothingSSSE3(int thread_id)
@@ -13,16 +15,21 @@ void MosquitoNR::SmoothingSSSE3(int thread_id)
   const int width = this->width;
   const int pitch = this->pitch;
   const int pitch2 = pitch * sizeof(short);
-  __declspec(align(16)) short sad[48], tmp[16];
-  short* srcp, * dstp, * sadp = sad, * tmpp = tmp;
-  for (int i = 0; i < 8; ++i) tmp[i] = 4;
-  for (int i = 8; i < 16; ++i) tmp[i] = 3;
+  __declspec(align(16)) short sad[48];
+  short* srcp;
+  short* dstp;
+  short* sadp = sad;
+
+  const __m128i fours = _mm_set1_epi16(4);
+  const __m128i threes = _mm_set1_epi16(3);
+
+  __m128i xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7;
 
   if (radius == 1)
   {
-    const int coef0 = 64 - strength * 2;	// own pixel's coefficient (when divisor = 64)
-    const int coef1 = 128 - strength * 4;	// own pixel's coefficient (when divisor = 128)
-    const int coef2 = strength;				// other pixel's coefficient
+    const int coef0 = 64 - strength * 2; // own pixel's coefficient (when divisor = 64)
+    const int coef1 = 128 - strength * 4; // own pixel's coefficient (when divisor = 128)
+    const int coef2 = strength; // other pixel's coefficient
 
     for (int y = y_start; y < y_end; ++y)
     {
@@ -31,128 +38,127 @@ void MosquitoNR::SmoothingSSSE3(int thread_id)
 
       for (int x = 0; x < width; x += 8)
       {
-        __asm
-        {
-          mov			esi, srcp
-          mov			edi, sadp				// edi = sadp
-          mov			edx, tmpp				// edx = tmpp
-          mov			eax, pitch2				// eax = pitch * sizeof(short)
-          movdqa		xmm6, [edx]				// xmm6 = [4] * 8
-          movdqa		xmm7, [esi]				// xmm7 = (  0,  0 )
-          sub			esi, eax				// esi = srcp - pitch
+        uint8_t* esi = (uint8_t*)srcp;
+        uint8_t* edi = (uint8_t*)sadp;
+        const int eax = pitch2; // pitch * sizeof(short)
 
-          movdqu		xmm0, [esi + eax - 2]		// xmm0 = ( -1,  0 )
-          movdqu		xmm1, [esi + eax + 2]		// xmm1 = (  1,  0 )
-          movdqu		xmm2, [esi - 2]			// xmm2 = ( -1, -1 )
-          movdqu		xmm3, [esi + 2 * eax + 2]		// xmm3 = (  1,  1 )
+        xmm6 = fours; // [4] * 8
+        xmm7 = _mm_load_si128(reinterpret_cast<const __m128i*>(esi)); // (  0,  0 )
+        //sub esi, eax // esi = srcp - pitch
 
-          movdqa		xmm4, xmm0
-          movdqa		xmm5, xmm1
-          psubw		xmm0, xmm7
-          psubw		xmm1, xmm7
-          pabsw		xmm0, xmm0
-          pabsw		xmm1, xmm1
-          paddw		xmm0, xmm1
-          movdqa[edi], xmm0
+        xmm0 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 2)); // ( -1,  0 )
+        xmm1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 2)); // (  1,  0 )
+        xmm2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - eax - 2)); // ( -1, -1 )
+        xmm3 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + eax + 2)); // (  1,  1 )
 
-          movdqa		xmm0, [esi]				// xmm0 = (  0, -1 )
-          movdqa		xmm1, [esi + 2 * eax]		// xmm1 = (  0,  1 )
+        xmm4 = xmm0;
+        xmm5 = xmm1;
+        xmm0 = _mm_sub_epi16(xmm0, xmm7);
+        xmm1 = _mm_sub_epi16(xmm1, xmm7);
+        xmm0 = _mm_abs_epi16(xmm0); // SSSE3
+        xmm1 = _mm_abs_epi16(xmm1); // SSSE3
+        xmm0 = _mm_add_epi16(xmm0, xmm1);
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi), xmm0);
 
-          paddw		xmm4, xmm2
-          paddw		xmm5, xmm3
-          psraw		xmm4, 1
-          psraw		xmm5, 1
-          psubw		xmm4, xmm7
-          psubw		xmm5, xmm7
-          pabsw		xmm4, xmm4
-          pabsw		xmm5, xmm5
-          paddw		xmm4, xmm5
-          paddw		xmm4, xmm6				// add "identification number" to the lower 3 bits (4)
-          psubw		xmm6, [edx + 16]			// (The lower 3 bits are always zero.
-          movdqa[edi + 16], xmm4			//  If input is 9-bit or more, this hack doesn't work)
+        xmm0 = _mm_load_si128(reinterpret_cast<const __m128i*>(esi - eax)); // (  0, -1 )
+        xmm1 = _mm_load_si128(reinterpret_cast<const __m128i*>(esi + eax)); // (  0,  1 )
 
-          movdqa		xmm4, xmm2
-          movdqa		xmm5, xmm3
-          psubw		xmm2, xmm7
-          psubw		xmm3, xmm7
-          pabsw		xmm2, xmm2
-          pabsw		xmm3, xmm3
-          paddw		xmm2, xmm3
-          paddw		xmm2, xmm6				// (1)
-          paddw		xmm6, [edx]
-          movdqa[edi + 32], xmm2
+        xmm4 = _mm_add_epi16(xmm4, xmm2);
+        xmm5 = _mm_add_epi16(xmm5, xmm3);
+        xmm4 = _mm_srai_epi16(xmm4, 1);
+        xmm5 = _mm_srai_epi16(xmm5, 1);
 
-          movdqu		xmm2, [esi + 2]			// xmm2 = (  1, -1 )
-          movdqu		xmm3, [esi + 2 * eax - 2]		// xmm3 = ( -1,  1 )
+        xmm4 = _mm_sub_epi16(xmm4, xmm7);
+        xmm5 = _mm_sub_epi16(xmm5, xmm7);
+        xmm4 = _mm_abs_epi16(xmm4); // SSSE3
+        xmm5 = _mm_abs_epi16(xmm5); // SSSE3
+        xmm4 = _mm_add_epi16(xmm4, xmm5);
+        xmm4 = _mm_add_epi16(xmm4, xmm6); // add "identification number" to the lower 3 bits (4)
+        xmm6 = _mm_sub_epi16(xmm6, threes); // (The lower 3 bits are always zero.
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi + 16), xmm4); // If input is 9-bit or more, this hack doesn't work)
 
-          paddw		xmm4, xmm0
-          paddw		xmm5, xmm1
-          psraw		xmm4, 1
-          psraw		xmm5, 1
-          psubw		xmm4, xmm7
-          psubw		xmm5, xmm7
-          pabsw		xmm4, xmm4
-          pabsw		xmm5, xmm5
-          paddw		xmm4, xmm5
-          paddw		xmm4, xmm6				// (5)
-          psubw		xmm6, [edx + 16]
-          movdqa[edi + 48], xmm4
+        xmm4 = xmm2;
+        xmm5 = xmm3;
+        xmm2 = _mm_sub_epi16(xmm2, xmm7);
+        xmm3 = _mm_sub_epi16(xmm3, xmm7);
+        xmm2 = _mm_abs_epi16(xmm2); // SSSE3
+        xmm3 = _mm_abs_epi16(xmm3); // SSSE3
+        xmm2 = _mm_add_epi16(xmm2, xmm3);
+        xmm2 = _mm_add_epi16(xmm2, xmm6);
+        xmm6 = _mm_add_epi16(xmm6, fours);
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi + 32), xmm2);
 
-          movdqa		xmm4, xmm0
-          movdqa		xmm5, xmm1
-          psubw		xmm0, xmm7
-          psubw		xmm1, xmm7
-          pabsw		xmm0, xmm0
-          pabsw		xmm1, xmm1
-          paddw		xmm0, xmm1
-          paddw		xmm0, xmm6				// (2)
-          paddw		xmm6, [edx]
-          movdqa[edi + 64], xmm0
+        xmm2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - eax + 2)); // (  1, -1 )
+        xmm3 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + eax - 2)); // ( -1,  1 )
 
-          movdqu		xmm0, [esi + eax + 2]		// xmm0 = (  1,  0 )
-          movdqu		xmm1, [esi + eax - 2]		// xmm1 = ( -1,  0 )
+        xmm4 = _mm_add_epi16(xmm4, xmm0);
+        xmm5 = _mm_add_epi16(xmm5, xmm1);
+        xmm4 = _mm_srai_epi16(xmm4, 1);
+        xmm5 = _mm_srai_epi16(xmm5, 1);
+        xmm4 = _mm_sub_epi16(xmm4, xmm7);
+        xmm5 = _mm_sub_epi16(xmm5, xmm7);
+        xmm4 = _mm_abs_epi16(xmm4); // SSSE3
+        xmm5 = _mm_abs_epi16(xmm5); // SSSE3
+        xmm4 = _mm_add_epi16(xmm4, xmm5);
+        xmm4 = _mm_add_epi16(xmm4, xmm6); // (5)
+        xmm6 = _mm_sub_epi16(xmm6, threes);
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi + 48), xmm4);
 
-          paddw		xmm4, xmm2
-          paddw		xmm5, xmm3
-          psraw		xmm4, 1
-          psraw		xmm5, 1
-          psubw		xmm4, xmm7
-          psubw		xmm5, xmm7
-          pabsw		xmm4, xmm4
-          pabsw		xmm5, xmm5
-          paddw		xmm4, xmm5
-          paddw		xmm4, xmm6				// (6)
-          psubw		xmm6, [edx + 16]
+        xmm4 = xmm0;
+        xmm5 = xmm1;
+        xmm0 = _mm_sub_epi16(xmm0, xmm7);
+        xmm1 = _mm_sub_epi16(xmm1, xmm7);
+        xmm0 = _mm_abs_epi16(xmm0); // SSSE3
+        xmm1 = _mm_abs_epi16(xmm1); // SSSE3
+        xmm0 = _mm_add_epi16(xmm0, xmm1);
+        xmm0 = _mm_add_epi16(xmm0, xmm6);
+        xmm6 = _mm_add_epi16(xmm6, fours);
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi + 64), xmm0);
 
-          pminsw		xmm4, [edi]
-          pminsw		xmm4, [edi + 16]
-          pminsw		xmm4, [edi + 32]
-          pminsw		xmm4, [edi + 48]
-          pminsw		xmm4, [edi + 64]
+        xmm0 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 2)); // (  1,  0 )
+        xmm1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 2)); // ( -1,  0 )
 
-          paddw		xmm0, xmm2
-          paddw		xmm1, xmm3
-          psubw		xmm2, xmm7
-          psubw		xmm3, xmm7
-          pabsw		xmm2, xmm2
-          pabsw		xmm3, xmm3
-          paddw		xmm2, xmm3
-          paddw		xmm2, xmm6				// (3)
-          paddw		xmm6, [edx]
+        xmm4 = _mm_add_epi16(xmm4, xmm2);
+        xmm5 = _mm_add_epi16(xmm5, xmm3);
+        xmm4 = _mm_srai_epi16(xmm4, 1);
+        xmm5 = _mm_srai_epi16(xmm5, 1);
+        xmm4 = _mm_sub_epi16(xmm4, xmm7);
+        xmm5 = _mm_sub_epi16(xmm5, xmm7);
+        xmm4 = _mm_abs_epi16(xmm4); // SSSE3
+        xmm5 = _mm_abs_epi16(xmm5); // SSSE3
+        xmm4 = _mm_add_epi16(xmm4, xmm5);
+        xmm4 = _mm_add_epi16(xmm4, xmm6); // (6)
+        xmm6 = _mm_sub_epi16(xmm6, threes);
 
-          psraw		xmm0, 1
-          psraw		xmm1, 1
-          psubw		xmm0, xmm7
-          psubw		xmm1, xmm7
-          pabsw		xmm0, xmm0
-          pabsw		xmm1, xmm1
-          paddw		xmm0, xmm1
-          paddw		xmm0, xmm6				// (7)
+        xmm4 = _mm_min_epi16(xmm4, _mm_load_si128(reinterpret_cast<const __m128i*>(edi + 0)));
+        xmm4 = _mm_min_epi16(xmm4, _mm_load_si128(reinterpret_cast<const __m128i*>(edi + 16)));
+        xmm4 = _mm_min_epi16(xmm4, _mm_load_si128(reinterpret_cast<const __m128i*>(edi + 32)));
+        xmm4 = _mm_min_epi16(xmm4, _mm_load_si128(reinterpret_cast<const __m128i*>(edi + 48)));
+        xmm4 = _mm_min_epi16(xmm4, _mm_load_si128(reinterpret_cast<const __m128i*>(edi + 64)));
 
-          pminsw		xmm4, xmm2
-          pminsw		xmm4, xmm0
-          movdqa[edi], xmm4
-        }
+        xmm0 = _mm_add_epi16(xmm0, xmm2);
+        xmm1 = _mm_add_epi16(xmm1, xmm3);
+        xmm2 = _mm_sub_epi16(xmm2, xmm7);
+        xmm3 = _mm_add_epi16(xmm3, xmm7);
+        xmm2 = _mm_abs_epi16(xmm2); // SSSE3
+        xmm3 = _mm_abs_epi16(xmm3); // SSSE3
+        xmm2 = _mm_add_epi16(xmm2, xmm3);
+        xmm2 = _mm_add_epi16(xmm2, xmm6); // (3)
+        xmm6 = _mm_add_epi16(xmm6, fours);
+
+        _mm_srai_epi16(xmm0, 1);
+        _mm_srai_epi16(xmm1, 1);
+        _mm_sub_epi16(xmm0, xmm7);
+        _mm_sub_epi16(xmm1, xmm7);
+        xmm0 = _mm_abs_epi16(xmm0); // SSSE3
+        xmm1 = _mm_abs_epi16(xmm1); // SSSE3
+        xmm0 = _mm_add_epi16(xmm0, xmm1);
+        xmm0 = _mm_add_epi16(xmm0, xmm6); // (7)
+
+        xmm4 = _mm_min_epi16(xmm4, xmm2);
+        xmm4 = _mm_min_epi16(xmm4, xmm0);
+
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi), xmm4);
 
         for (int i = 0; i < 8; ++i, ++srcp, ++dstp)
         {
@@ -181,12 +187,12 @@ void MosquitoNR::SmoothingSSSE3(int thread_id)
       }
     }
   }
-  else	// radius == 2
+  else // radius == 2
   {
-    const int coef0 = 128 - strength * 4;	// own pixel's coefficient (when divisor = 128)
-    const int coef1 = 256 - strength * 8;	// own pixel's coefficient (when divisor = 256)
-    const int coef2 = strength;				// other pixel's coefficient
-    const int coef3 = strength * 2;			// other pixel's coefficient (doubled)
+    const int coef0 = 128 - strength * 4; // own pixel's coefficient (when divisor = 128)
+    const int coef1 = 256 - strength * 8; // own pixel's coefficient (when divisor = 256)
+    const int coef2 = strength; // other pixel's coefficient
+    const int coef3 = strength * 2; // other pixel's coefficient (doubled)
 
     for (int y = y_start; y < y_end; ++y)
     {
@@ -195,193 +201,186 @@ void MosquitoNR::SmoothingSSSE3(int thread_id)
 
       for (int x = 0; x < width; x += 8)
       {
-        __asm
-        {
-          mov			esi, srcp
-          mov			edi, sadp				// edi = sadp
-          mov			edx, tmpp				// edx = tmpp
-          mov			eax, pitch2				// eax = pitch * sizeof(short)
-          lea			ecx, [eax + 2 * eax]		// ecx = pitch * sizeof(short) * 3
-          movdqa		xmm6, [edx]				// xmm6 = [0x0001] * 8
-          movdqa		xmm7, [esi]				// xmm7 = (  0,  0 )
-          sub			esi, eax
-          sub			esi, eax				// esi = srcp - 2 * pitch
+        uint8_t* esi = (uint8_t*)srcp;
+        uint8_t* edi = (uint8_t*)sadp;
+        const int eax = pitch2; //  eax = pitch * sizeof(short)
+        xmm6 = fours; // xmm6 = [4] * 8
+        xmm7 = _mm_load_si128(reinterpret_cast<const __m128i*>(esi)); // (  0,  0 )
 
-          movdqu		xmm0, [esi + 2 * eax - 2]		// xmm0 = ( -1,  0 )
-          movdqu		xmm1, [esi + 2 * eax + 2]		// xmm1 = (  1,  0 )
-          movdqu		xmm2, [esi + 2 * eax - 4]		// xmm2 = ( -2,  0 )
-          movdqu		xmm3, [esi + 2 * eax + 4]		// xmm3 = (  2,  0 )
-          movdqa		xmm4, xmm0
-          movdqa		xmm5, xmm1
-          psubw		xmm0, xmm7
-          psubw		xmm1, xmm7
-          psubw		xmm2, xmm7
-          psubw		xmm3, xmm7
-          pabsw		xmm0, xmm0
-          pabsw		xmm1, xmm1
-          pabsw		xmm2, xmm2
-          pabsw		xmm3, xmm3
-          paddw		xmm0, xmm1
-          paddw		xmm2, xmm3
-          paddw		xmm0, xmm2
-          movdqa[edi], xmm0
+        xmm0 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 2)); // ( -1,  0 )
+        xmm1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 2)); // (  1,  0 )
+        xmm2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 4)); // ( -2,  0 )
+        xmm3 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 4)); // (  2,  0 )
+        xmm4 = xmm0;
+        xmm5 = xmm1;
+        xmm0 = _mm_sub_epi16(xmm0, xmm7);
+        xmm1 = _mm_sub_epi16(xmm1, xmm7);
+        xmm2 = _mm_sub_epi16(xmm2, xmm7);
+        xmm3 = _mm_sub_epi16(xmm3, xmm7);
+        xmm0 = _mm_abs_epi16(xmm0);
+        xmm1 = _mm_abs_epi16(xmm1);
+        xmm2 = _mm_abs_epi16(xmm2);
+        xmm3 = _mm_abs_epi16(xmm3);
+        xmm0 = _mm_add_epi16(xmm0, xmm1);
+        xmm2 = _mm_add_epi16(xmm2, xmm3);
+        xmm0 = _mm_add_epi16(xmm0, xmm2);
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi), xmm0);
 
-          movdqu		xmm0, [esi + eax - 2]		// xmm0 = ( -1, -1 )
-          movdqu		xmm1, [esi + ecx + 2]		// xmm1 = (  1,  1 )
-          movdqu		xmm2, [esi + eax - 4]		// xmm2 = ( -2, -1 )
-          movdqu		xmm3, [esi + ecx + 4]		// xmm3 = (  2,  1 )
-          paddw		xmm4, xmm0
-          paddw		xmm5, xmm1
-          psraw		xmm4, 1
-          psraw		xmm5, 1
-          psubw		xmm2, xmm7
-          psubw		xmm3, xmm7
-          psubw		xmm4, xmm7
-          psubw		xmm5, xmm7
-          pabsw		xmm2, xmm2
-          pabsw		xmm3, xmm3
-          pabsw		xmm4, xmm4
-          pabsw		xmm5, xmm5
-          paddw		xmm2, xmm3
-          paddw		xmm4, xmm5
-          paddw		xmm2, xmm4
-          paddw		xmm2, xmm6				// add "identification number" to the lower 3 bits (4)
-          psubw		xmm6, [edx + 16]
-          movdqa[edi + 16], xmm2
+        xmm0 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 1 * eax - 2)); // ( -1, -1 )
+        xmm1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 1 * eax + 2)); // (  1,  1 )
+        xmm2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 1 * eax - 4)); // ( -2, -1 )
+        xmm3 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 1 * eax + 4)); // (  2,  1 )
+        xmm4 = _mm_add_epi16(xmm4, xmm0);
+        xmm5 = _mm_add_epi16(xmm5, xmm1);
+        xmm4 = _mm_srai_epi16(xmm4, 1);
+        xmm5 = _mm_srai_epi16(xmm5, 1);
+        xmm2 = _mm_sub_epi16(xmm2, xmm7);
+        xmm3 = _mm_sub_epi16(xmm3, xmm7);
+        xmm4 = _mm_sub_epi16(xmm4, xmm7);
+        xmm5 = _mm_sub_epi16(xmm5, xmm7);
+        xmm2 = _mm_abs_epi16(xmm2);
+        xmm3 = _mm_abs_epi16(xmm3);
+        xmm4 = _mm_abs_epi16(xmm4);
+        xmm5 = _mm_abs_epi16(xmm5);
+        xmm2 = _mm_add_epi16(xmm2, xmm3);
+        xmm4 = _mm_add_epi16(xmm4, xmm5);
+        xmm2 = _mm_add_epi16(xmm2, xmm4);
+        xmm2 = _mm_add_epi16(xmm2, xmm6); // add "identification number" to the lower 3 bits (4)
+        xmm6 = _mm_sub_epi16(xmm6, threes);
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi + 16), xmm2);
 
-          movdqu		xmm2, [esi - 4]			// xmm2 = ( -2, -2 )
-          movdqu		xmm3, [esi + 4 * eax + 4]		// xmm3 = (  2,  2 )
-          movdqa		xmm4, xmm0
-          movdqa		xmm5, xmm1
-          psubw		xmm0, xmm7
-          psubw		xmm1, xmm7
-          psubw		xmm2, xmm7
-          psubw		xmm3, xmm7
-          pabsw		xmm0, xmm0
-          pabsw		xmm1, xmm1
-          pabsw		xmm2, xmm2
-          pabsw		xmm3, xmm3
-          paddw		xmm0, xmm1
-          paddw		xmm2, xmm3
-          paddw		xmm0, xmm2
-          paddw		xmm0, xmm6				// (1)
-          paddw		xmm6, [edx]
-          movdqa[edi + 32], xmm0
+        xmm2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 2 * eax - 4)); // ( -2, -2 )
+        xmm3 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 2 * eax + 4)); // (  2,  2 )
+        xmm4 = xmm0;
+        xmm5 = xmm1;
+        xmm0 = _mm_sub_epi16(xmm0, xmm7);
+        xmm1 = _mm_sub_epi16(xmm1, xmm7);
+        xmm2 = _mm_sub_epi16(xmm2, xmm7);
+        xmm3 = _mm_sub_epi16(xmm3, xmm7);
+        xmm0 = _mm_abs_epi16(xmm0);
+        xmm1 = _mm_abs_epi16(xmm1);
+        xmm2 = _mm_abs_epi16(xmm2);
+        xmm3 = _mm_abs_epi16(xmm3);
+        xmm0 = _mm_add_epi16(xmm0, xmm1);
+        xmm2 = _mm_add_epi16(xmm2, xmm3);
+        xmm0 = _mm_add_epi16(xmm0, xmm2);
+        xmm0 = _mm_add_epi16(xmm0, xmm6); // (1)
+        xmm6 = _mm_add_epi16(xmm6, fours);
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi + 32), xmm0);
 
-          movdqa		xmm0, [esi + eax]			// xmm0 = (  0, -1 )
-          movdqa		xmm1, [esi + ecx]			// xmm1 = (  0,  1 )
-          movdqu		xmm2, [esi - 2]			// xmm2 = ( -1, -2 )
-          movdqu		xmm3, [esi + 4 * eax + 2]		// xmm3 = (  1,  2 )
-          paddw		xmm4, xmm0
-          paddw		xmm5, xmm1
-          psraw		xmm4, 1
-          psraw		xmm5, 1
-          psubw		xmm2, xmm7
-          psubw		xmm3, xmm7
-          psubw		xmm4, xmm7
-          psubw		xmm5, xmm7
-          pabsw		xmm2, xmm2
-          pabsw		xmm3, xmm3
-          pabsw		xmm4, xmm4
-          pabsw		xmm5, xmm5
-          paddw		xmm2, xmm3
-          paddw		xmm4, xmm5
-          paddw		xmm2, xmm4
-          paddw		xmm2, xmm6				// (5)
-          psubw		xmm6, [edx + 16]
-          movdqa[edi + 48], xmm2
+        xmm0 = _mm_load_si128(reinterpret_cast<const __m128i*>(esi - 1 * eax)); // (  0, -1 )
+        xmm1 = _mm_load_si128(reinterpret_cast<const __m128i*>(esi + 1 * eax)); // (  0,  1 )
+        xmm2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 2 * eax - 2)); // ( -1, -2 )
+        xmm3 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 2 * eax + 2)); // (  1,  2 )
+        xmm4 = _mm_add_epi16(xmm4, xmm0);
+        xmm5 = _mm_add_epi16(xmm5, xmm1);
+        xmm4 = _mm_srai_epi16(xmm4, 1);
+        xmm5 = _mm_srai_epi16(xmm5, 1);
+        xmm2 = _mm_sub_epi16(xmm2, xmm7);
+        xmm3 = _mm_sub_epi16(xmm3, xmm7);
+        xmm4 = _mm_sub_epi16(xmm4, xmm7);
+        xmm5 = _mm_sub_epi16(xmm5, xmm7);
+        xmm2 = _mm_abs_epi16(xmm2);
+        xmm3 = _mm_abs_epi16(xmm3);
+        xmm4 = _mm_abs_epi16(xmm4);
+        xmm5 = _mm_abs_epi16(xmm5);
+        xmm2 = _mm_add_epi16(xmm2, xmm3);
+        xmm4 = _mm_add_epi16(xmm4, xmm5);
+        xmm2 = _mm_add_epi16(xmm2, xmm4);
+        xmm2 = _mm_add_epi16(xmm2, xmm6); // (5)
+        xmm6 = _mm_sub_epi16(xmm6, threes);
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi + 48), xmm2);
 
-          movdqa		xmm2, [esi]				// xmm2 = (  0, -2 )
-          movdqa		xmm3, [esi + 4 * eax]		// xmm3 = (  0,  2 )
-          movdqa		xmm4, xmm0
-          movdqa		xmm5, xmm1
-          psubw		xmm0, xmm7
-          psubw		xmm1, xmm7
-          psubw		xmm2, xmm7
-          psubw		xmm3, xmm7
-          pabsw		xmm0, xmm0
-          pabsw		xmm1, xmm1
-          pabsw		xmm2, xmm2
-          pabsw		xmm3, xmm3
-          paddw		xmm0, xmm1
-          paddw		xmm2, xmm3
-          paddw		xmm0, xmm2
-          paddw		xmm0, xmm6				// (2)
-          paddw		xmm6, [edx]
-          movdqa[edi + 64], xmm0
+        xmm2 = _mm_load_si128(reinterpret_cast<const __m128i*>(esi - 2 * eax)); // (  0, -2 )
+        xmm3 = _mm_load_si128(reinterpret_cast<const __m128i*>(esi + 2 * eax)); // (  0,  2 )
+        xmm4 = xmm0;
+        xmm5 = xmm1;
+        xmm0 = _mm_sub_epi16(xmm0, xmm7);
+        xmm1 = _mm_sub_epi16(xmm1, xmm7);
+        xmm2 = _mm_sub_epi16(xmm2, xmm7);
+        xmm3 = _mm_sub_epi16(xmm3, xmm7);
+        xmm0 = _mm_abs_epi16(xmm0);
+        xmm1 = _mm_abs_epi16(xmm1);
+        xmm2 = _mm_abs_epi16(xmm2);
+        xmm3 = _mm_abs_epi16(xmm3);
+        xmm0 = _mm_add_epi16(xmm0, xmm1);
+        xmm2 = _mm_add_epi16(xmm2, xmm3);
+        xmm0 = _mm_add_epi16(xmm0, xmm2);
+        xmm0 = _mm_add_epi16(xmm0, xmm6); // (2)
+        xmm6 = _mm_add_epi16(xmm6, fours);
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi + 64), xmm0);
 
-          movdqu		xmm0, [esi + eax + 2]		// xmm0 = (  1, -1 )
-          movdqu		xmm1, [esi + ecx - 2]		// xmm1 = ( -1,  1 )
-          movdqu		xmm2, [esi + 2]			// xmm2 = (  1, -2 )
-          movdqu		xmm3, [esi + 4 * eax - 2]		// xmm3 = ( -1,  2 )
-          paddw		xmm4, xmm0
-          paddw		xmm5, xmm1
-          psraw		xmm4, 1
-          psraw		xmm5, 1
-          psubw		xmm2, xmm7
-          psubw		xmm3, xmm7
-          psubw		xmm4, xmm7
-          psubw		xmm5, xmm7
-          pabsw		xmm2, xmm2
-          pabsw		xmm3, xmm3
-          pabsw		xmm4, xmm4
-          pabsw		xmm5, xmm5
-          paddw		xmm2, xmm3
-          paddw		xmm4, xmm5
-          paddw		xmm2, xmm4
-          paddw		xmm2, xmm6				// (6)
-          psubw		xmm6, [edx + 16]
-          movdqa[edi + 80], xmm2
+        xmm0 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 1 * eax + 2)); // (  1, -1 )
+        xmm1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 1 * eax - 2)); // ( -1,  1 )
+        xmm2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 2 * eax + 2)); // (  1, -2 )
+        xmm3 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 2 * eax - 2)); // ( -1,  2 )
+        xmm4 = _mm_add_epi16(xmm4, xmm0);
+        xmm5 = _mm_add_epi16(xmm5, xmm1);
+        xmm4 = _mm_srai_epi16(xmm4, 1);
+        xmm5 = _mm_srai_epi16(xmm5, 1);
+        xmm2 = _mm_sub_epi16(xmm2, xmm7);
+        xmm3 = _mm_sub_epi16(xmm3, xmm7);
+        xmm4 = _mm_sub_epi16(xmm4, xmm7);
+        xmm5 = _mm_sub_epi16(xmm5, xmm7);
+        xmm2 = _mm_abs_epi16(xmm2);
+        xmm3 = _mm_abs_epi16(xmm3);
+        xmm4 = _mm_abs_epi16(xmm4);
+        xmm5 = _mm_abs_epi16(xmm5);
+        xmm2 = _mm_add_epi16(xmm2, xmm3);
+        xmm4 = _mm_add_epi16(xmm4, xmm5);
+        xmm2 = _mm_add_epi16(xmm2, xmm4);
+        xmm2 = _mm_add_epi16(xmm2, xmm6); // (6)
+        xmm6 = _mm_sub_epi16(xmm6, threes);
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi + 80), xmm2);
 
-          movdqu		xmm2, [esi + 4]			// xmm2 = (  2, -2 )
-          movdqu		xmm3, [esi + 4 * eax - 4]		// xmm3 = ( -2,  2 )
-          movdqa		xmm4, xmm0
-          movdqa		xmm5, xmm1
-          psubw		xmm0, xmm7
-          psubw		xmm1, xmm7
-          psubw		xmm2, xmm7
-          psubw		xmm3, xmm7
-          pabsw		xmm0, xmm0
-          pabsw		xmm1, xmm1
-          pabsw		xmm2, xmm2
-          pabsw		xmm3, xmm3
-          paddw		xmm0, xmm1
-          paddw		xmm2, xmm3
-          paddw		xmm0, xmm2
-          paddw		xmm0, xmm6				// (3)
-          paddw		xmm6, [edx]
+        xmm2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 2 * eax + 4)); // (  2, -2 )
+        xmm3 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 2 * eax - 4)); // ( -2,  2 )
+        xmm4 = xmm0;
+        xmm5 = xmm1;
+        xmm0 = _mm_sub_epi16(xmm0, xmm7);
+        xmm1 = _mm_sub_epi16(xmm1, xmm7);
+        xmm2 = _mm_sub_epi16(xmm2, xmm7);
+        xmm3 = _mm_sub_epi16(xmm3, xmm7);
+        xmm0 = _mm_abs_epi16(xmm0);
+        xmm1 = _mm_abs_epi16(xmm1);
+        xmm2 = _mm_abs_epi16(xmm2);
+        xmm3 = _mm_abs_epi16(xmm3);
+        xmm0 = _mm_add_epi16(xmm0, xmm1);
+        xmm2 = _mm_add_epi16(xmm2, xmm3);
+        xmm0 = _mm_add_epi16(xmm0, xmm2);
+        xmm0 = _mm_add_epi16(xmm0, xmm6); // (3)
+        xmm6 = _mm_add_epi16(xmm6, fours);
 
-          pminsw		xmm0, [edi]
-          pminsw		xmm0, [edi + 16]
-          pminsw		xmm0, [edi + 32]
-          pminsw		xmm0, [edi + 48]
-          pminsw		xmm0, [edi + 64]
-          pminsw		xmm0, [edi + 80]
+        xmm0 = _mm_min_epi16(xmm0, _mm_load_si128(reinterpret_cast<const __m128i*>(edi)));
+        xmm0 = _mm_min_epi16(xmm0, _mm_load_si128(reinterpret_cast<const __m128i*>(edi + 16)));
+        xmm0 = _mm_min_epi16(xmm0, _mm_load_si128(reinterpret_cast<const __m128i*>(edi + 32)));
+        xmm0 = _mm_min_epi16(xmm0, _mm_load_si128(reinterpret_cast<const __m128i*>(edi + 48)));
+        xmm0 = _mm_min_epi16(xmm0, _mm_load_si128(reinterpret_cast<const __m128i*>(edi + 64)));
+        xmm0 = _mm_min_epi16(xmm0, _mm_load_si128(reinterpret_cast<const __m128i*>(edi + 80)));
 
-          movdqu		xmm1, [esi + 2 * eax + 2]		// xmm1 = (  1,  0 )
-          movdqu		xmm2, [esi + eax + 4]		// xmm2 = (  2, -1 )
-          movdqu		xmm3, [esi + ecx - 4]		// xmm3 = ( -2,  1 )
-          paddw		xmm4, xmm1
-          movdqu		xmm1, [esi + 2 * eax - 2]		// xmm1 = ( -1,  0 )
-          paddw		xmm5, xmm1
-          psraw		xmm4, 1
-          psraw		xmm5, 1
-          psubw		xmm2, xmm7
-          psubw		xmm3, xmm7
-          psubw		xmm4, xmm7
-          psubw		xmm5, xmm7
-          pabsw		xmm2, xmm2
-          pabsw		xmm3, xmm3
-          pabsw		xmm4, xmm4
-          pabsw		xmm5, xmm5
-          paddw		xmm2, xmm3
-          paddw		xmm4, xmm5
-          paddw		xmm2, xmm4
-          paddw		xmm2, xmm6				// (7)
+        xmm1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 2)); // (  1,  0 )
+        xmm2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 1 * eax + 4)); // (  2, -1 )
+        xmm3 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi + 1 * eax - 4)); // ( -2,  1 )
+        xmm4 = _mm_add_epi16(xmm4, xmm1);
+        xmm1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(esi - 2)); // ( -1,  0 )
+        xmm5 = _mm_add_epi16(xmm5, xmm1);
+        xmm4 = _mm_srai_epi16(xmm4, 1);
+        xmm5 = _mm_srai_epi16(xmm5, 1);
+        xmm2 = _mm_sub_epi16(xmm2, xmm7);
+        xmm3 = _mm_sub_epi16(xmm3, xmm7);
+        xmm4 = _mm_sub_epi16(xmm4, xmm7);
+        xmm5 = _mm_sub_epi16(xmm5, xmm7);
+        xmm2 = _mm_abs_epi16(xmm2);
+        xmm3 = _mm_abs_epi16(xmm3);
+        xmm4 = _mm_abs_epi16(xmm4);
+        xmm5 = _mm_abs_epi16(xmm5);
+        xmm2 = _mm_add_epi16(xmm2, xmm3);
+        xmm4 = _mm_add_epi16(xmm4, xmm5);
+        xmm2 = _mm_add_epi16(xmm2, xmm4);
+        xmm2 = _mm_add_epi16(xmm2, xmm6); // (7)
 
-          pminsw		xmm0, xmm2
-          movdqa[edi], xmm0
-        }
+        xmm0 = _mm_min_epi16(xmm0, xmm2);
+        _mm_store_si128(reinterpret_cast<__m128i*>(edi), xmm0);
 
         for (int i = 0; i < 8; ++i, ++srcp, ++dstp)
         {
@@ -408,8 +407,8 @@ void MosquitoNR::SmoothingSSSE3(int thread_id)
           }
         }
       }
-    }
-  }
+    } // y
+  } // radius 2
 
   // vertical reflection
   if (y_start <= 1 && 1 < y_end)

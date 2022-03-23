@@ -1,25 +1,26 @@
 /*
 **                      MosquitoNR ver 0.10
 **
-**	Copyright (C) 2012-2013 Wataru Inariba <oinari17@gmail.com>
+** Copyright (C) 2012-2013 Wataru Inariba <oinari17@gmail.com>
 **
-**	This program is free software; you can redistribute it and/or
-**	modify it under the terms of the GNU General Public License
-**	as published by the Free Software Foundation; either version 2
-**	of the License, or (at your option) any later version.
+** This program is free software; you can redistribute it and/or
+** modify it under the terms of the GNU General Public License
+** as published by the Free Software Foundation; either version 2
+** of the License, or (at your option) any later version.
 **
-**	This program is distributed in the hope that it will be useful,
-**	but WITHOUT ANY WARRANTY; without even the implied warranty of
-**	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-**	GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful,
+** but WITHOUT ANY WARRANTY; without even the implied warranty of
+** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+** GNU General Public License for more details.
 **
-**	You should have received a copy of the GNU General Public License
-**	along with this program. If not, see <http://www.gnu.org/licenses/>.
+** You should have received a copy of the GNU General Public License
+** along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
 // This program is compiled by VC++ 2010 Express.
 
 #include "mosquito_nr.h"
+#include <emmintrin.h>
 
 // constructor
 MosquitoNR::MosquitoNR(PClip _child, int _strength, int _restore, int _radius, int _threads, IScriptEnvironment* env)
@@ -71,7 +72,7 @@ PVideoFrame __stdcall MosquitoNR::GetFrame(int n, IScriptEnvironment* env)
       src->GetRowSize(PLANAR_V), src->GetHeight(PLANAR_V));
   }
 
-  if (strength == 0) {	// do nothing
+  if (strength == 0) { // do nothing
     env->BitBlt(dst->GetWritePtr(), dst->GetPitch(), src->GetReadPtr(), src->GetPitch(), src->GetRowSize(), src->GetHeight());
     return dst;
   }
@@ -79,7 +80,7 @@ PVideoFrame __stdcall MosquitoNR::GetFrame(int n, IScriptEnvironment* env)
   CopyLumaFrom();
   mt.ExecMTFunc(&MosquitoNR::Smoothing);
 
-  if (restore == 0) {		// no restoring
+  if (restore == 0) { // no restoring
     CopyLumaTo();
     return dst;
   }
@@ -144,51 +145,34 @@ void MosquitoNR::FreeBuffer()
 void MosquitoNR::CopyLumaFrom()
 {
   const int src_pitch = src->GetPitch();
-  const int dst_pitch = pitch * sizeof(short);
+  const auto dst_pitch = pitch * sizeof(short);
   const int height = this->height;
   const BYTE* srcp = src->GetReadPtr();
   short* dstp = luma[0];
 
-    const int hloop = (width + 15) / 16;
+  const int hloop = (width + 15) / 16;
 
-    __asm
-    {
-      mov			esi, srcp			// esi = srcp
-      mov			edi, dstp
-      mov			eax, src_pitch		// eax = src_pitch
-      mov			ebx, dst_pitch		// ebx = pitch * sizeof(short)
-      mov			ecx, height			// ecx = height
-      lea			edi, [edi + 2 * ebx + 16]	// edi = dstp + 2 * pitch + 8
-      pxor		xmm7, xmm7			// xmm7 = [0x00] * 16
+  __m128i xmm0, xmm1, xmm7;
+  uint8_t* edi = (uint8_t*)(dstp + 2 * pitch + 8); // edi = dstp + 2 * pitch + 8
 
-      align 16
-      nextrow_planar:
-      push		esi
-        push		edi
-        mov			edx, hloop			// edx = hloop
+  xmm7 = _mm_setzero_si128();
 
-        align 16
-        next16pixels_planar :
-        movdqu		xmm0, [esi]
-        movdqa		xmm1, xmm0
-        punpcklbw	xmm0, xmm7
-        punpckhbw	xmm1, xmm7
-        psllw		xmm0, 4				// convert to internal 12-bit precision
-        psllw		xmm1, 4
-        movdqa[edi], xmm0
-        movdqa[edi + 16], xmm1
-        add			esi, 16
-        add			edi, 32
-        sub			edx, 1
-        jnz			next16pixels_planar
+  for (int y = 0; y < height; y++) {
+    //next16pixels_planar :
+    for (int x = 0; x < hloop; x++) {
+      xmm0 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(srcp + x * 16)); // movdqu xmm0, [esi]
+      xmm1 = xmm0;
+      xmm0 = _mm_unpacklo_epi8(xmm0, xmm7);
+      xmm1 = _mm_unpackhi_epi8(xmm1, xmm7);
+      xmm0 = _mm_slli_epi16(xmm0, 4); // convert to internal 12-bit precision
+      xmm1 = _mm_slli_epi16(xmm1, 4); // convert to internal 12-bit precision
+      _mm_store_si128(reinterpret_cast<__m128i*>(edi + x * 32), xmm0);
+      _mm_store_si128(reinterpret_cast<__m128i*>(edi + x * 32 + 16), xmm1);
+    } // sub edx, 1         jnz next16pixels_planar
 
-        pop			edi
-        pop			esi
-        add			esi, eax
-        add			edi, ebx
-        sub			ecx, 1
-        jnz			nextrow_planar
-    }
+    srcp += src_pitch; // add esi, eax
+    edi += dst_pitch; // add edi, ebx
+  }
 
   // horizontal reflection
   short* p = luma[0] + 2 * pitch + 8;
@@ -210,48 +194,33 @@ void MosquitoNR::CopyLumaTo()
   short* srcp = luma[1];
   BYTE* dstp = dst->GetWritePtr();
 
-    const int hloop = (width + 15) / 16;
+  const int hloop = (width + 15) / 16;
 
-    __asm
-    {
-      mov			esi, srcp
-      mov			edi, dstp			// edi = dstp
-      mov			eax, src_pitch		// eax = pitch * sizeof(short)
-      mov			ebx, dst_pitch		// ebx = dst_pitch
-      mov			ecx, height			// ecx = height
-      lea			esi, [esi + 2 * eax + 16]	// esi = srcp + 2 * pitch + 8
-      mov			edx, 00080008h
-      movd		xmm7, edx
-      pshufd		xmm7, xmm7, 0		// xmm7 = [0x0008] * 8
+  __m128i xmm0, xmm1, xmm7;
+  uint8_t* esi = (uint8_t*)(srcp + 2 * pitch + 8); // // esi = srcp + 2 * pitch + 8
+  uint8_t* edi = (uint8_t*)dstp; //   mov edi, dstp // edi = dstp
 
-      align 16
-      nextrow_planar:
-      push		esi
-        push		edi
-        mov			edx, hloop			// edx = hloop
+  xmm7 = _mm_set1_epi16(8); // xmm7 = [0x0008] * 8 rounder
 
-        align 16
-        next16pixels_planar :
-        movdqa		xmm0, [esi]
-        movdqa		xmm1, [esi + 16]
-        paddw		xmm0, xmm7
-        paddw		xmm1, xmm7
-        psraw		xmm0, 4
-        psraw		xmm1, 4
-        packuswb	xmm0, xmm1
-        movdqa[edi], xmm0
-        add			esi, 32
-        add			edi, 16
-        sub			edx, 1
-        jnz			next16pixels_planar
+  // nextrow_planar:
+  for (int y = 0; y < height; y++) {
+    //next16pixels_planar :
+    for (int x = 0; x < hloop; x++) {
+      xmm0 = _mm_load_si128(reinterpret_cast<const __m128i*>(esi + x * 32));
+      xmm1 = _mm_load_si128(reinterpret_cast<const __m128i*>(esi + x * 32 + 16));
+      xmm0 = _mm_add_epi16(xmm0, xmm7); // paddw xmm0, xmm7
+      xmm1 = _mm_add_epi16(xmm1, xmm7); // paddw xmm0, xmm7
+      // paddw xmm1, xmm7
+      xmm0 = _mm_srai_epi16(xmm0, 4); //  psraw xmm0, 4
+      xmm1 = _mm_srai_epi16(xmm1, 4); //    psraw xmm1, 4
 
-        pop			edi
-        pop			esi
-        add			esi, eax
-        add			edi, ebx
-        sub			ecx, 1
-        jnz			nextrow_planar
-    }
+      xmm0 = _mm_packus_epi16(xmm0, xmm1); //  packuswb xmm0, xmm1
+      _mm_store_si128(reinterpret_cast<__m128i*>(edi + x * 16), xmm0);
+    } // sub edx, 1  jnz next16pixels_planar
+
+    esi += src_pitch; // add esi, eax
+    edi += dst_pitch; // add edi, ebx
+  }
 }
 
 void MosquitoNR::Smoothing(int thread_id)
