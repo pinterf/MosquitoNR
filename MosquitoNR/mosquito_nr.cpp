@@ -27,6 +27,11 @@ MosquitoNR::MosquitoNR(PClip _child, int _strength, int _restore, int _radius, i
   : GenericVideoFilter(_child), strength(_strength), restore(_restore), radius(_radius), threads(_threads),
   width(vi.width), height(vi.height), pitch(((width + 7) & ~7) + 16)
 {
+  // Check frame property support
+  has_at_least_v8 = true;
+  try { env->CheckVersion(8); }
+  catch (const AvisynthError&) { has_at_least_v8 = false; }
+
   InitBuffer();
 
   // error checks
@@ -62,7 +67,7 @@ MosquitoNR::~MosquitoNR() { FreeBuffer(); }
 PVideoFrame __stdcall MosquitoNR::GetFrame(int n, IScriptEnvironment* env)
 {
   src = child->GetFrame(n, env);
-  dst = env->NewVideoFrame(vi);
+  dst = has_at_least_v8 ? env->NewVideoFrameP(vi, &src) : env->NewVideoFrame(vi);
 
   // copy chroma
   if (!vi.IsY8() && vi.IsPlanar()) {

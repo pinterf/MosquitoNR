@@ -58,6 +58,7 @@ public:
 class MosquitoNR : public GenericVideoFilter
 {
 private:
+  bool has_at_least_v8; // passing frame property support
   const int strength, restore, radius;
   int threads;
   const int width, height;
@@ -73,7 +74,6 @@ private:
   void InitBuffer();
   bool AllocBuffer();
   void FreeBuffer();
-  void SmoothingSSE2(int thread_id);
   void SmoothingSSSE3(int thread_id);
 
 public:
