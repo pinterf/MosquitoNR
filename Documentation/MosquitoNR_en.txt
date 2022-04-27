@@ -1,5 +1,5 @@
 
-                              MosquitoNR ver 0.20
+                              MosquitoNR ver 0.3
 
 
 [Description]
@@ -71,7 +71,10 @@
 
 [Changelog]
   
-  ver 0.2 (2022-03-23) (pinterf)
+  ver 0.3 (2022-04-27) (pinterf)
+    - Fix #1: crash when restore is 1..127
+
+  ver 0.20 (2022-03-23) (pinterf)
     - moved to github: https://github.com/pinterf/MosquitoNR
     - No longer a cpp 2.5 plugin: update to Avisynth V2.6 interface
     - Preserve frame properties when AviSynth+
