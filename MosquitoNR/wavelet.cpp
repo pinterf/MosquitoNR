@@ -534,7 +534,7 @@ void MosquitoNR::WaveletHorz3(int thread_id)
       _mm_store_si128(reinterpret_cast<__m128i*>(edi + 16), xmm7);
       xmm0 = xmm4;
       xmm1 = xmm5;
-      edi += 64;
+      esi += 64;
       edi += 32;
       edx += 32;
     }
