@@ -139,17 +139,17 @@ void MosquitoNR::SmoothingSSSE3(int thread_id)
         xmm0 = _mm_add_epi16(xmm0, xmm2);
         xmm1 = _mm_add_epi16(xmm1, xmm3);
         xmm2 = _mm_sub_epi16(xmm2, xmm7);
-        xmm3 = _mm_add_epi16(xmm3, xmm7);
+        xmm3 = _mm_sub_epi16(xmm3, xmm7);
         xmm2 = _mm_abs_epi16(xmm2); // SSSE3
         xmm3 = _mm_abs_epi16(xmm3); // SSSE3
         xmm2 = _mm_add_epi16(xmm2, xmm3);
         xmm2 = _mm_add_epi16(xmm2, xmm6); // (3)
         xmm6 = _mm_add_epi16(xmm6, fours);
 
-        _mm_srai_epi16(xmm0, 1);
-        _mm_srai_epi16(xmm1, 1);
-        _mm_sub_epi16(xmm0, xmm7);
-        _mm_sub_epi16(xmm1, xmm7);
+        xmm0 = _mm_srai_epi16(xmm0, 1);
+        xmm1 = _mm_srai_epi16(xmm1, 1);
+        xmm0 = _mm_sub_epi16(xmm0, xmm7);
+        xmm1 = _mm_sub_epi16(xmm1, xmm7);
         xmm0 = _mm_abs_epi16(xmm0); // SSSE3
         xmm1 = _mm_abs_epi16(xmm1); // SSSE3
         xmm0 = _mm_add_epi16(xmm0, xmm1);
